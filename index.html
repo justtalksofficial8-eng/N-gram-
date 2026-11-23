@@ -3,194 +3,64 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>N-gram Text Generator</title>
+<title>Simple N-gram Text Generator</title>
 <style>
-:root{--bg:#fff;--fg:#1c1c1e;--muted:#666;--card:#f5f5f7;--accent:#2563eb;--btn-fg:#fff;--border:#d4d4d8}
-@media (prefers-color-scheme:dark){:root{--bg:#18181b;--fg:#f4f4f5;--muted:#a1a1aa;--card:#27272a;--accent:#60a5fa;--btn-fg:#111;--border:#3f3f46}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-main{max-width:760px;margin:0 auto;padding:20px 16px 48px}
-h1{font-size:1.5rem;margin:0 0 4px}
-p.sub{color:var(--muted);margin:0 0 20px}
-label{display:block;font-size:.85rem;color:var(--muted);margin:12px 0 4px}
-textarea,input,select{width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--fg);font:inherit}
-textarea{min-height:150px;resize:vertical}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
-.check{display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--fg);font-size:.95rem}
-.check input{width:auto}
-button{margin-top:16px;margin-right:8px;padding:11px 18px;border:0;border-radius:8px;background:var(--accent);color:var(--btn-fg);font:inherit;font-weight:600;cursor:pointer}
-button.alt{background:var(--card);color:var(--fg);border:1px solid var(--border)}
-.out{margin-top:20px}
-.sample{background:var(--card);border-left:4px solid var(--accent);border-radius:6px;padding:10px 12px;margin:8px 0;white-space:pre-wrap;overflow-wrap:anywhere}
-.stats,.odds{color:var(--muted);font-size:.85rem;margin-top:12px}
-.odds div{display:flex;justify-content:space-between;max-width:260px}
+  body { font-family: sans-serif; max-width: 700px; margin: 20px auto; padding: 0 16px; }
+  textarea { width: 100%; height: 150px; }
+  input { width: 70px; }
+  button { margin-top: 10px; padding: 8px 16px; }
+  #output { margin-top: 16px; padding: 10px; background: #eee; min-height: 40px; }
 </style>
 </head>
 <body>
-<main>
   <h1>N-gram Text Generator</h1>
-  <p class="sub">Learns which word (or character) follows the previous few, then writes new text from those patterns. Runs fully in your browser.</p>
+  <p>Paste some text. The program learns which words follow each other and writes new text.</p>
 
-  <label for="corpus">Training text (paste your own, or upload a .txt file)</label>
-  <textarea id="corpus"></textarea>
-  <input type="file" id="file" accept=".txt,text/plain">
+  <textarea id="text">Students learn best when they can express their ideas in the language they understand. A good assistant helps students ask questions, read notes and write answers in their own language. Teachers can explain difficult ideas in simple words. Students can share their ideas with classmates and friends. Small steps help students make progress. Clear examples help students remember what they learn.</textarea>
 
-  <div class="grid">
-    <div><label for="n">n (1–6)</label><input id="n" type="number" min="1" max="6" value="2"></div>
-    <div><label for="level">Level</label>
-      <select id="level"><option value="word">Word</option><option value="char">Character</option></select></div>
-    <div><label for="tokens">Max length</label><input id="tokens" type="number" min="5" max="1000" value="40"></div>
-    <div><label for="temp">Randomness: <span id="tempv">1.0</span></label>
-      <input id="temp" type="range" min="0.3" max="2" step="0.1" value="1"></div>
-  </div>
+  <p>
+    n (1-5): <input id="n" type="number" min="1" max="5" value="2">
+    &nbsp; Words to write: <input id="len" type="number" min="5" max="200" value="30">
+  </p>
 
-  <label for="prompt">Starting text (optional)</label>
-  <input id="prompt" type="text" placeholder="e.g. students can">
-  <label class="check"><input id="lower" type="checkbox" checked> Ignore capital letters</label>
-
-  <button id="go">Generate</button><button id="odds" class="alt">Show next-word odds</button>
-
-  <div class="out">
-    <div id="results"></div>
-    <div id="oddsBox" class="odds"></div>
-    <div id="stats" class="stats"></div>
-  </div>
-</main>
+  <button onclick="generate()">Generate</button>
+  <div id="output"></div>
 
 <script>
-"use strict";
-const START = "<s>", END = "</s>";
-const TOKEN_RE = /[^\s.,!?;:।]+|[.,!?;:।]/gu;
-const SENT_END = new Set([".", "!", "?", "।"]);
+function generate() {
+  const words = document.getElementById("text").value.toLowerCase().split(/\s+/).filter(Boolean);
+  const n = parseInt(document.getElementById("n").value) || 2;
+  const len = parseInt(document.getElementById("len").value) || 30;
+  const size = n; // how many words we look back at (n = 1 means 1 previous word)
 
-const SAMPLE = `Students learn best when they can express their ideas in the language they understand. A good assistant helps students ask questions, read notes and write answers in their own language. Language should never be a barrier to learning. Teachers can explain difficult ideas in simple words. Students can share their ideas with classmates and friends. A digital assistant can help students translate words and phrases. It can explain academic terms in simple language. Students can ask questions about exams, fees and classes. The assistant can answer questions quickly and clearly. Good communication helps students feel confident in class. Confident students ask more questions and share more ideas. Learning a new language takes time and practice. Students can practice new words every day. Small steps help students make progress. Teachers can use simple examples to explain new ideas. Clear examples help students remember what they learn. Students can read, write and speak in the language they prefer. Every student deserves to be understood.`;
+  if (words.length <= size) {
+    document.getElementById("output").textContent = "Please add more text.";
+    return;
+  }
 
-function sequences(text, level) {
-  if (level === "char") {
-    return text.split("\n").map(l => l.replace(/\s+/g, " ").trim()).filter(Boolean).map(l => Array.from(l));
+  // Learn: for each group of `size` words, remember the word that came next
+  const next = {};
+  for (let i = 0; i + size < words.length; i++) {
+    const key = words.slice(i, i + size).join(" ");
+    if (!next[key]) next[key] = [];
+    next[key].push(words[i + size]);
   }
-  const out = []; let cur = [];
-  for (const t of (text.match(TOKEN_RE) || [])) {
-    cur.push(t);
-    if (SENT_END.has(t)) { out.push(cur); cur = []; }
+
+  // Generate: start at a random place, then keep picking a next word
+  const keys = Object.keys(next);
+  let current = keys[Math.floor(Math.random() * keys.length)].split(" ");
+  const result = [...current];
+
+  for (let i = 0; i < len; i++) {
+    const options = next[current.join(" ")];
+    if (!options) break; // dead end
+    const pick = options[Math.floor(Math.random() * options.length)];
+    result.push(pick);
+    current = result.slice(-size);
   }
-  if (cur.length) out.push(cur);
-  return out;
+
+  document.getElementById("output").textContent = result.join(" ");
 }
-
-function joinTokens(tokens, level) {
-  if (level === "char") return tokens.join("");
-  return tokens.join(" ").replace(/\s+([.,!?;:।])/g, "$1");
-}
-
-class NGram {
-  constructor(n, level, lower) {
-    this.n = n; this.level = level; this.lower = lower; this.seen = 0;
-    this.counts = Array.from({ length: n }, () => new Map());
-  }
-  key(arr) { return arr.join("\u0001"); }
-  train(text) {
-    if (this.lower) text = text.toLowerCase();
-    for (const seq of sequences(text, this.level)) {
-      const p = Array(this.n - 1).fill(START).concat(seq, [END]);
-      for (let i = this.n - 1; i < p.length; i++) {
-        for (let k = 0; k < this.n; k++) {
-          const ctx = this.key(k ? p.slice(i - k, i) : []);
-          let m = this.counts[k].get(ctx);
-          if (!m) { m = new Map(); this.counts[k].set(ctx, m); }
-          m.set(p[i], (m.get(p[i]) || 0) + 1);
-        }
-        this.seen++;
-      }
-    }
-    if (!this.seen) throw new Error("Please add some training text first.");
-  }
-  startHistory(prompt) {
-    if (this.lower) prompt = prompt.toLowerCase();
-    const pt = prompt ? sequences(prompt, this.level).flat() : [];
-    return { history: Array(this.n - 1).fill(START).concat(pt), pt };
-  }
-  choices(history) {
-    for (let k = Math.min(this.n - 1, history.length); k >= 0; k--) {
-      const m = this.counts[k].get(this.key(k ? history.slice(-k) : []));
-      if (m) return m;
-    }
-    return null;
-  }
-  generate(max, prompt, temp) {
-    const { history, pt } = this.startHistory(prompt);
-    const out = pt.slice();
-    for (let i = 0; i < max; i++) {
-      const m = this.choices(history);
-      if (!m) break;
-      const toks = [...m.keys()];
-      const w = [...m.values()].map(c => Math.pow(c, 1 / temp));
-      let r = Math.random() * w.reduce((a, b) => a + b, 0), pick = toks[toks.length - 1];
-      for (let j = 0; j < toks.length; j++) { r -= w[j]; if (r <= 0) { pick = toks[j]; break; } }
-      if (pick === END) break;
-      out.push(pick); history.push(pick);
-    }
-    return joinTokens(out, this.level);
-  }
-  odds(prompt, top) {
-    const m = this.choices(this.startHistory(prompt).history);
-    if (!m) return [];
-    const total = [...m.values()].reduce((a, b) => a + b, 0);
-    return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, top)
-      .map(([t, c]) => [t === END ? "(end)" : t, c / total]);
-  }
-}
-
-const $ = id => document.getElementById(id);
-$("corpus").value = SAMPLE;
-$("temp").addEventListener("input", () => $("tempv").textContent = Number($("temp").value).toFixed(1));
-$("file").addEventListener("change", e => {
-  const f = e.target.files[0];
-  if (f) f.text().then(t => { $("corpus").value = t; });
-});
-
-function build() {
-  const n = Math.max(1, Math.min(6, parseInt($("n").value, 10) || 2));
-  const model = new NGram(n, $("level").value, $("lower").checked);
-  model.train($("corpus").value);
-  const vocab = model.counts[0].get("").size - 1;
-  $("stats").textContent = `${n}-gram, ${$("level").value} level: ${model.seen} tokens learned, ${vocab} distinct.`;
-  return model;
-}
-
-function run(fn) {
-  try { fn(); } catch (err) {
-    $("results").textContent = err.message; $("oddsBox").innerHTML = ""; $("stats").textContent = "";
-  }
-}
-
-$("go").addEventListener("click", () => run(() => {
-  const model = build();
-  const max = Math.max(5, parseInt($("tokens").value, 10) || 40);
-  const box = $("results"); box.innerHTML = ""; $("oddsBox").innerHTML = "";
-  for (let i = 0; i < 3; i++) {
-    const d = document.createElement("div");
-    d.className = "sample";
-    d.textContent = model.generate(max, $("prompt").value, Number($("temp").value));
-    box.appendChild(d);
-  }
-}));
-
-$("odds").addEventListener("click", () => run(() => {
-  const model = build();
-  const rows = model.odds($("prompt").value, 5);
-  const box = $("oddsBox");
-  box.innerHTML = "";
-  const head = document.createElement("div");
-  head.textContent = "Most likely next tokens:";
-  box.appendChild(head);
-  rows.forEach(([t, p]) => {
-    const d = document.createElement("div");
-    const a = document.createElement("span"), b = document.createElement("span");
-    a.textContent = t; b.textContent = (p * 100).toFixed(1) + "%";
-    d.append(a, b); box.appendChild(d);
-  });
-}));
 </script>
 </body>
 </html>
